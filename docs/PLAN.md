@@ -6,7 +6,7 @@ The repo is empty (branch `claude/shortform-video-editor-plan-x8i2i0`, no commit
 
 Decisions from the Q&A:
 
-- **Browsers:** Chromium-first. Export uses WebCodecs, with ffmpeg.wasm only as a lazy fallback.
+- **Browsers:** Chromium-first, plus iPhone Safari (WebKit) as a full-editing target; verify each milestone on device. Export uses WebCodecs, with ffmpeg.wasm only as a lazy fallback.
 - **Input size:** phone clips, up to 1080p and up to 10 minutes total.
 - **Fillers:** the MVP removes silence only. Filler words ("um", "uh") wait for Whisper, which also powers subtitles later.
 - **Assets:** a small bundled CC0 SFX pack. The user brings the music.

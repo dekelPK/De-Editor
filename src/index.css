@@ -5,3 +5,10 @@ body,
 #root {
   height: 100%;
 }
+
+/* iOS: no rubber-band scroll or double-tap zoom on the editor surface */
+body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}

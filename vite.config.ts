@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
+  base: './', // relative paths so it works under any GitHub Pages sub-path
   plugins: [react(), tailwindcss()],
   worker: { format: 'es' },
   test: {

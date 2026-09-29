@@ -7,7 +7,15 @@ The full architecture and milestone plan is in [`docs/PLAN.md`](docs/PLAN.md).
 ## Requirements
 
 - Node 20 or newer
-- A Chromium-based browser (Chrome or Edge). Export uses WebCodecs.
+- A browser with WebCodecs: Chrome or Edge on desktop, Safari 16.4+ on iPhone (less mature, checked per milestone).
+
+## Open on iPhone
+
+The app is deployed to GitHub Pages by `.github/workflows/deploy.yml` (builds `dist/` and pushes it to the `gh-pages` branch).
+
+One-time setup: repo **Settings -> Pages -> Source: Deploy from a branch -> `gh-pages` / (root)**. After the first workflow run, the site is at `https://<user>.github.io/De-Editor/`. Open it in Safari and use Share -> Add to Home Screen for a full-screen app.
+
+Every iPhone browser uses WebKit, so WebCodecs, WebGL in workers and audio encoding must be verified on the device for each milestone.
 
 ## Scripts
 
