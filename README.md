@@ -1,66 +1,77 @@
 # De-Editor
 
-Browser-based short-form video editor (Reels / TikTok / Shorts). It outputs vertical 1080×1920 video and has an auto-edit engine that turns raw footage plus a style preset into an editable first cut. Everything runs client-side.
+עורך סרטונים קצרים בדפדפן (Reels / TikTok / Shorts). הפלט הוא וידאו אנכי 1080×1920, ויש בו מנוע עריכה אוטומטית שהופך צילומי גלם וסגנון (preset) לגרסה ראשונה ערוכה, שאפשר לתקן ידנית. הכול רץ אצלך בדפדפן, בלי שרת.
 
-The full architecture and milestone plan is in [`docs/PLAN.md`](docs/PLAN.md).
+התוכנית המלאה ואבני הדרך נמצאות ב־[`docs/PLAN.md`](docs/PLAN.md).
 
-## Requirements
+## איך פותחים באייפון
 
-- Node 20 or newer
-- A browser with WebCodecs: Chrome or Edge on desktop, Safari 16.4+ on iPhone (less mature, checked per milestone).
+האתר מתפרסם אוטומטית ל־GitHub Pages בכל שינוי בענף.
 
-## Open on iPhone
+1. בגיטהאב, בריפו: **Settings ← Pages ← Source: Deploy from a branch ← ענף `gh-pages`, תיקייה `/ (root)`** ← Save. (פעם אחת בלבד.)
+2. חכה שהריצה תסתיים בלשונית **Actions** (בערך דקה).
+3. באייפון, ב־Safari, פתח: `https://dekelpk.github.io/De-Editor/`
+4. להוספה למסך הבית: כפתור השיתוף ← **הוסף למסך הבית**. האפליקציה תיפתח במסך מלא.
 
-The app is deployed to GitHub Pages by `.github/workflows/deploy.yml` (builds `dist/` and pushes it to the `gh-pages` branch).
+הערה: כל הדפדפנים באייפון (גם Chrome) רצים על מנוע Safari, ולכן כל אבן דרך צריכה בדיקה על המכשיר עצמו.
 
-One-time setup: repo **Settings -> Pages -> Source: Deploy from a branch -> `gh-pages` / (root)**. After the first workflow run, the site is at `https://<user>.github.io/De-Editor/`. Open it in Safari and use Share -> Add to Home Screen for a full-screen app.
+## איך מריצים במחשב
 
-Every iPhone browser uses WebKit, so WebCodecs, WebGL in workers and audio encoding must be verified on the device for each milestone.
+דרוש Node 20 ומעלה.
 
-## Scripts
+```
+npm install
+npm run dev
+```
 
-| Command             | What it does                                 |
-| ------------------- | -------------------------------------------- |
-| `npm run dev`       | Start the dev server (http://localhost:5173) |
-| `npm test`          | Run unit tests (Vitest)                      |
-| `npm run lint`      | Run ESLint                                   |
-| `npm run typecheck` | Run the TypeScript check                     |
-| `npm run build`     | Produce a production build in `dist/`        |
+ואז פותחים http://localhost:5173.
 
-## Source layout
+| פקודה               | מה היא עושה                    |
+| ------------------- | ------------------------------ |
+| `npm run dev`       | שרת פיתוח                      |
+| `npm test`          | בדיקות יחידה (Vitest)          |
+| `npm run lint`      | בדיקת סגנון קוד (ESLint)       |
+| `npm run typecheck` | בדיקת TypeScript               |
+| `npm run build`     | בנייה לפרודקשן בתיקיית `dist/` |
 
-| Folder         | Purpose                                                              |
-| -------------- | -------------------------------------------------------------------- |
-| `src/model`    | Project data model, schema, pure edit operations (no UI)             |
-| `src/state`    | Zustand stores (project + undo history, UI, playback, asset handles) |
-| `src/media`    | Import, probing, frame sources                                       |
-| `src/render`   | WebGL2 compositor, shared by preview and export                      |
-| `src/audio`    | Preview audio engine, offline export mix                             |
-| `src/export`   | Export worker (WebCodecs + MP4 muxing)                               |
-| `src/analysis` | DSP (silence, beats, motion) running in Web Workers                  |
-| `src/engine`   | Auto-edit engine (pure functions) and preset JSON                    |
-| `src/ui`       | React components                                                     |
+## דפדפנים נתמכים
 
-Folders appear as their milestone lands.
+דפדפן עם WebCodecs: Chrome או Edge במחשב, Safari 16.4 ומעלה באייפון (פחות בשל, נבדק בכל אבן דרך).
 
-## Data model
+## מבנה התיקיות
 
-_Documented in M1._
+| תיקייה         | תפקיד                                                               |
+| -------------- | ------------------------------------------------------------------- |
+| `src/model`    | מודל הנתונים של הפרויקט, סכמות ופעולות עריכה טהורות (בלי ממשק)      |
+| `src/state`    | מצב האפליקציה (Zustand): פרויקט והיסטוריית Undo, ממשק, ניגון, קבצים |
+| `src/media`    | ייבוא וקריאת מידע על קבצים, מקורות פריימים                          |
+| `src/render`   | מרנדר WebGL2, משותף לתצוגה המקדימה ולייצוא                          |
+| `src/audio`    | מנוע שמע לתצוגה מקדימה ומיקס לייצוא                                 |
+| `src/export`   | ייצוא (WebCodecs ואריזת MP4)                                        |
+| `src/analysis` | ניתוח (שקט, ביטים, תנועה) ב־Web Workers                             |
+| `src/engine`   | מנוע העריכה האוטומטית (פונקציות טהורות) וקבצי preset                |
+| `src/ui`       | רכיבי React                                                         |
 
-## Preset format
+תיקיות נוספות יופיעו עם אבני הדרך.
 
-_Documented in M8–M10._
+## מודל הנתונים
 
-## Status
+יתועד באבן דרך M1.
 
-- [x] M0: Scaffold
-- [ ] M1: Project model, pure edit operations, undo/redo
-- [ ] M2: Media import and library
-- [ ] M3: Timeline UI
-- [ ] M4: Preview compositor and playback
-- [ ] M5: Text, volume, music
-- [ ] M6: Export
-- [ ] M7: Analysis workers
-- [ ] M8: Auto-edit engine v1
-- [ ] M9: Auto-edit engine v2
-- [ ] M10: Presets, color grade, docs
+## פורמט ה־preset
+
+יתועד באבני דרך M8–M10.
+
+## סטטוס
+
+- [x] M0: שלד הפרויקט, פריסה למובייל ופרסום ל־Pages
+- [ ] M1: מודל הפרויקט, פעולות עריכה, Undo/Redo
+- [ ] M2: ייבוא מדיה וספריית מדיה
+- [ ] M3: ציר זמן
+- [ ] M4: תצוגה מקדימה וניגון
+- [ ] M5: טקסט, עוצמת שמע, מוזיקה
+- [ ] M6: ייצוא
+- [ ] M7: ניתוח (שקט, ביטים, תנועה)
+- [ ] M8: מנוע עריכה אוטומטית, שלב א
+- [ ] M9: מנוע עריכה אוטומטית, שלב ב
+- [ ] M10: presets, צבע ותיעוד

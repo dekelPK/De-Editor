@@ -4,7 +4,7 @@ import { PROJECT_HEIGHT, PROJECT_WIDTH } from '../model/constants'
 type Panel = 'media' | 'inspector'
 
 /**
- * Editor shell. Desktop (md+): library | preview | inspector, timeline below.
+ * Editor shell. Desktop (md+): library | preview | inspector, timeline below. RTL page; the timeline itself will be forced LTR in M3.
  * Phone: preview on top, timeline in the middle, and a bottom tab bar that
  * switches the lower area between timeline, media and inspector.
  */
@@ -12,10 +12,10 @@ export function App() {
   const [panel, setPanel] = useState<Panel | null>(null)
 
   const media = (
-    <aside className="border-neutral-800 p-3 text-sm text-neutral-400 md:border-e">Media</aside>
+    <aside className="border-neutral-800 p-3 text-sm text-neutral-400 md:border-e">מדיה</aside>
   )
   const inspector = (
-    <aside className="border-neutral-800 p-3 text-sm text-neutral-400 md:border-s">Inspector</aside>
+    <aside className="border-neutral-800 p-3 text-sm text-neutral-400 md:border-s">מאפיינים</aside>
   )
 
   return (
@@ -39,7 +39,7 @@ export function App() {
       <section
         className={`h-52 shrink-0 overflow-auto border-t border-neutral-800 p-3 text-sm text-neutral-400 md:col-span-3 md:h-auto ${panel ? 'hidden md:block' : ''}`}
       >
-        Timeline
+        ציר זמן
       </section>
       {panel && (
         <div className="h-52 shrink-0 overflow-auto border-t border-neutral-800 md:hidden">
@@ -50,9 +50,9 @@ export function App() {
       <nav className="flex h-12 shrink-0 border-t border-neutral-800 md:hidden">
         {(
           [
-            [null, 'Timeline'],
-            ['media', 'Media'],
-            ['inspector', 'Inspector'],
+            [null, 'ציר זמן'],
+            ['media', 'מדיה'],
+            ['inspector', 'מאפיינים'],
           ] as const
         ).map(([id, label]) => (
           <button

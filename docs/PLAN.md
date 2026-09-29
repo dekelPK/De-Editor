@@ -1,128 +1,114 @@
-# Short-form video editor: architecture and milestone plan
+# תוכנית: עורך סרטונים קצרים – ארכיטקטורה ואבני דרך
 
-## Context
+## רקע
 
-The repo is empty (branch `claude/shortform-video-editor-plan-x8i2i0`, no commits). We're building a client-side 9:16 editor. Its differentiator is an auto-edit engine that turns raw footage plus a style preset into a normal, editable project.
+עורך וידאו אנכי 9:16 שרץ כולו בדפדפן. הייחוד שלו הוא מנוע עריכה אוטומטית: צילומי גלם וסגנון (preset) הופכים לפרויקט רגיל שאפשר לערוך ידנית.
 
-Decisions from the Q&A:
+החלטות שהתקבלו:
 
-- **Browsers:** Chromium-first, plus iPhone Safari (WebKit) as a full-editing target; verify each milestone on device. Export uses WebCodecs, with ffmpeg.wasm only as a lazy fallback.
-- **Input size:** phone clips, up to 1080p and up to 10 minutes total.
-- **Fillers:** the MVP removes silence only. Filler words ("um", "uh") wait for Whisper, which also powers subtitles later.
-- **Assets:** a small bundled CC0 SFX pack. The user brings the music.
+- **דפדפנים:** Chrome/Edge במחשב ו־Safari באייפון (עריכה מלאה בטלפון). כל אבן דרך נבדקת על המכשיר.
+- **ייצוא:** WebCodecs. ffmpeg.wasm רק כגיבוי לקבצים שהדפדפן לא מפענח.
+- **גודל קלט:** קליפים מהטלפון עד 1080p ועד 10 דקות בסך הכול.
+- **מילות מילוי:** ב־MVP מסירים רק שקט. מילות מילוי ("אממ") יגיעו עם זיהוי דיבור (Whisper), שישמש גם לכתוביות בעברית.
+- **צלילים:** חבילת אפקטים חינמית (CC0) מובנית. את המוזיקה המשתמש מביא.
 
-## Stack (changes from the proposal in bold)
+## טכנולוגיות
 
-- React 18 + TypeScript (strict) + Vite, Zustand + **Immer patches** for undo/redo, Tailwind.
-- **Mediabunny** for demux, decode, encode and mux of MP4/MOV/WebM. It replaces mp4box.js and mp4-muxer and works inside workers.
-  - ffmpeg.wasm (single-thread core, loaded lazily) is only for transcoding inputs that WebCodecs can't decode.
-- **WebGL2 compositor, one module shared by preview and export.** The same code draws the preview canvas and the export OffscreenCanvas, so the export matches the preview.
-- Web Audio: live AudioContext for preview, **OfflineAudioContext** for the export mix.
-- **Comlink** for typed worker calls. **Zod** validates project and preset JSON.
-- Vitest for unit tests (model, engine, DSP). Playwright for one e2e smoke test (the pre-installed Chromium).
-- Font: Heebo (Latin and Hebrew), so RTL subtitles later need no font swap.
+- React + TypeScript (strict) + Vite, Zustand עם Immer patches ל־Undo/Redo, Tailwind.
+- **Mediabunny** לפענוח, קידוד ואריזה של MP4/MOV/WebM, גם בתוך workers.
+- **מרנדר WebGL2 אחד** משותף לתצוגה המקדימה ולייצוא, כך שהייצוא זהה למה שרואים.
+- Web Audio: `AudioContext` לניגון, `OfflineAudioContext` למיקס הייצוא.
+- Comlink לתקשורת עם workers, Zod לוולידציה של פרויקט ו־preset.
+- Vitest לבדיקות יחידה, Playwright לבדיקת עשן.
+- גופן Heebo (לטינית ועברית).
 
-## Architecture
+## ארכיטקטורה
 
 ```
 src/
-  model/      types.ts, schema.ts (zod), time.ts, ops/*.ts (pure edits), selectors.ts (clipsAt(t), duration…)
-  state/      projectStore (project + immer patch history), uiStore (selection, zoom), playbackStore, assetStore (File/blob handles, NOT in project JSON)
-  media/      import.ts (probe via Mediabunny), thumbnails, frameSources/{videoElementSource, webcodecsSource}
-  render/     compositor.ts (WebGL2), shaders/, textRaster.ts (OffscreenCanvas 2D → texture), grade.ts
-  audio/      previewEngine.ts (scheduled AudioBufferSourceNodes, master clock), offlineMix.ts
-  export/     export.worker.ts (compositor on OffscreenCanvas + VideoEncoder + Mediabunny muxer)
-  analysis/   dsp/ (pure: rms, silence, onset, tempo/beat, motion), analysis.worker.ts
-  engine/     autoEdit.ts + stages/*.ts (pure), presets/*.json, rng.ts (seeded)
-  ui/         Library, Timeline, Preview, Inspector, Toolbar, ExportDialog, AutoEditDialog
-public/sfx/   CC0 whoosh/pop/riser/hit (with LICENSE list)
+  model/     טיפוסים, סכמות, פעולות עריכה טהורות, selectors
+  state/     projectStore (פרויקט + היסטוריה), uiStore, playbackStore, assetStore
+  media/     ייבוא, תמונות ממוזערות, מקורות פריימים
+  render/    compositor (WebGL2), shaders, רסטור טקסט
+  audio/     מנוע ניגון, מיקס אופליין
+  export/    worker ייצוא
+  analysis/  DSP טהור + worker ניתוח
+  engine/    autoEdit + שלבים + presets
+  ui/        רכיבי React
+public/sfx/  אפקטים קוליים CC0
 ```
 
-### Project model (key points; full spec goes in the README)
+### מודל הפרויקט
 
-- **Time is stored as integer microseconds.** WebCodecs uses the same unit, and integers avoid float drift. The UI snaps to the project fps.
-- `Project { schemaVersion, id, settings{width:1080,height:1920,fps:30,background}, assets: Record<id, AssetMeta>, tracks: Track[] }`
-- `AssetMeta { id, kind: video|audio|image, name, durationUs, width?, height?, hasAudio, fps?, analysisRef? }`. It holds no binary data; `assetStore` maps the id to the File.
-- `Track { id, kind: video|audio|text, name, muted, locked, clips: Clip[], transitions: Transition[] }`. Order in the array is z-order.
-- `Clip { id, assetId?, startUs, inUs, outUs, speed, volume, muted, transform{x,y,scale,rotation,crop}, text?, effects: Effect[], origin: {by:'auto'|'user', rule?} }`
-  - Visual properties are typed `Animatable<number> = number | Keyframe[]`. The MVP only writes plain numbers, so keyframes can be added later without a migration. Punch-in _ramps_ can use them.
-- `Transition { id, fromClipId, toClipId, type: crossfade|whip|zoom|flash|slide, durationUs }`. It sits centered on the cut and uses handle media from both clips; if a clip has no handle, the frame is held.
-- `Effect { type: 'grade'|'lut'…, params }`. The MVP ships `grade` (exposure, contrast, saturation, temperature, vignette).
-- All edits are pure `op(project, args) → project`. The store wraps them in `produceWithPatches`, and undo/redo replays the inverse or forward patches. The UI never mutates the model directly.
+- **זמן במיקרו־שניות שלמות** (אותה יחידה כמו WebCodecs, בלי סטיות של מספרים עשרוניים).
+- `Project`: הגדרות (1080×1920, fps), נכסים (assets), רצועות (tracks).
+- `Track`: סוג (וידאו/שמע/טקסט), השתקה, נעילה, קליפים ומעברים. סדר הרצועות הוא סדר השכבות.
+- `Clip`: נכס, נקודות התחלה וסיום, מהירות, עוצמה, טרנספורם, טקסט, אפקטים, ו־`origin` (אוטומטי/משתמש + שם הכלל שיצר אותו).
+- ערכים חזותיים הם `Animatable`, כך שאפשר להוסיף keyframes בהמשך בלי מיגרציה.
+- כל עריכה היא פונקציה טהורה `op(project, args) → project`. הממשק לא משנה את המודל ישירות.
 
-### Auto-edit engine
+### מנוע העריכה האוטומטית
 
-`autoEdit({ project, analyses, preset, options, seed }) → Project`. It is pure and deterministic. Each stage is a separate function with its own tests:
+`autoEdit({ project, analyses, preset, options, seed }) → Project`. פונקציה טהורה ודטרמיניסטית, ולכל שלב בדיקות משלו:
 
-1. **segment**: speech/activity segments come from the silence map. Each cut gets padding (`preset.silence.padMs`).
-2. **score**: loudness, onset density and motion per segment. The weights come from the preset.
-3. **hook**: copy the top-scoring 1.5–3 s window to the start as a teaser. The story keeps its original order (a talking head must stay coherent), and the preset can switch this off or move the segment instead.
-4. **pace**: split segments longer than `maxShotS` at the lowest-energy point, and merge any shorter than `minShotS`.
-5. **beatSnap**: move each cut to the nearest beat within `snapToleranceMs`, but only inside silence gaps so no word is cut.
-6. **reframe**: center-crop transform for landscape sources. The interface takes a `subjectTrack?` so tracking can plug in later.
-7. **zoom**: punch-in pattern from the preset, for example `[1.0, 1.15, 1.0, 1.25]`, with a jitter limit.
-8. **transitions + sfx**: presets define probabilities per cut type. The SFX clips go on a dedicated audio track.
-9. **loop**: choose the end point whose frame best matches the first frame (from the motion thumbnails), then add a short audio fade.
-10. **music**: put the music on its own track, apply ducking under speech (volume keyframes later, a constant level in the MVP), and grade every clip.
+1. **segment** – קטעי דיבור/פעילות לפי מפת השקט, עם ריפוד.
+2. **score** – ציון לכל קטע לפי עוצמה, צפיפות אונסטים ותנועה.
+3. **hook** – העתקת 1.5–3 השניות החזקות ביותר לתחילת הסרטון כטיזר.
+4. **pace** – פיצול קטעים ארוכים ומיזוג קצרים, לפי קצב היעד של ה־preset.
+5. **beatSnap** – הצמדת חיתוכים לביטים, רק בתוך שקט.
+6. **reframe** – חיתוך למרכז לצילומי לרוחב (ממשק מוכן למעקב אחרי נושא בעתיד).
+7. **zoom** – זום פנימה (punch-in) לפי תבנית מה־preset.
+8. **transitions + sfx** – מעברים ואפקטים קוליים על החיתוכים.
+9. **loop** – סיום שתואם לפריים הראשון, לצפייה חוזרת חלקה.
+10. **music** – רצועת מוזיקה, הנמכה מתחת לדיבור וצבע.
 
-Every generated clip carries an `origin.rule` tag, so the UI can show which rule made each decision and you can override any of them.
+כל קליפ שנוצר מסומן בכלל שיצר אותו, כדי שאפשר יהיה לשנות כל החלטה ידנית.
 
-### Preset format (JSON, zod-validated, documented in the README)
+### פורמט ה־preset (JSON עם ולידציה)
 
-`{ id, name, pacing{minShotS,maxShotS,targetShotS}, silence{thresholdDb|auto, minSilenceMs, padMs}, hook{enabled, mode:'teaser'|'move', lenS}, beats{snap, snapToleranceMs}, zoom{pattern[], maxScale}, transitions{default, pool[{type,weight,durationMs}] }, sfx{onCut:[{file,prob}]}, music{targetLufs, duckDb}, grade{…}, loop{enabled} }`
+קצב (`pacing`), שקט (`silence`), hook, ביטים (`beats`), זום (`zoom`), מעברים (`transitions`), אפקטים קוליים (`sfx`), מוזיקה (`music`), צבע (`grade`), לולאה (`loop`). ארבעה presets: Fast Hype, Talking Head, Food/Lifestyle, Fashion/GRWM.
 
-The four presets: Fast Hype, Talking Head, Food/Lifestyle, Fashion/GRWM.
+### ניתוח (ב־Web Workers בלבד)
 
-### Analysis (Web Workers only)
+- שמע: המרה למונו 22.05kHz (בערך 5MB לדקה).
+- **עוצמה ושקט:** RMS בפריימים של 20ms, סף אדפטיבי לפי רצפת הרעש.
+- **ביטים:** spectral flux, הערכת טמפו ומעקב ביטים בקוד שלנו (essentia.js הוא AGPL, לכן לא בשימוש).
+- **תנועה:** פריימים ב־5fps בגודל 64×36 והפרשים ביניהם. משמש גם להתאמת הלולאה.
 
-- Mediabunny decodes audio in the worker and downmixes it to mono 22.05 kHz. That is about 5 MB per 1 min, versus about 23 MB per minute for 48 kHz stereo.
-- **RMS / loudness** uses 20 ms frames.
-- **Silence** uses an adaptive threshold (noise floor from the 10th percentile plus an offset) with hysteresis and a minimum duration.
-- **Beats** come from spectral-flux onsets, a tempo estimate by autocorrelation, and dynamic-programming beat tracking (Ellis). It's our own code; essentia.js is AGPL.
-- **Motion and scene changes** use frames decoded at 5 fps and downscaled to 64×36, scored by frame difference. The same thumbnails feed the loop matcher.
-- Results are cached per asset in memory for now; IndexedDB comes later. Progress events stream back to the UI.
+### ניגון
 
-### Playback
+- השעון הראשי הוא `AudioContext.currentTime`.
+- תצוגה מקדימה: מאגר אלמנטי `<video>` עם תיקון סטייה. ייצוא: מקור פריימים מדויק דרך WebCodecs.
 
-- The master clock is `AudioContext.currentTime`.
-- Preview video uses a pool of `HTMLVideoElement`s with `requestVideoFrameCallback` and drift correction (seek when off by more than 1 frame). Frames upload as textures to the compositor.
-- Export instead uses the frame-accurate `webcodecsSource`. Both implement one `FrameSource` interface.
+## אבני דרך
 
-## Milestones (each one is tested and committed)
+| #   | אבן דרך                                                          | איך בודקים                                               |
+| --- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| M0  | שלד: Vite/React/TS/Tailwind, פריסה למובייל, פרסום ל־Pages        | האתר נפתח באייפון; `npm test` ו־`npm run lint` עוברים    |
+| M1  | מודל + סכמות + פעולות עריכה + Undo/Redo                          | בדיקות יחידה                                             |
+| M2  | ייבוא: גרירה, מידע על הקובץ, ספריית מדיה                         | להוסיף MP4, MOV, MP3, PNG ולראות משך ומידות              |
+| M3  | ציר זמן: גרירה, חיתוך, פיצול, מחיקה, הצמדה, קיצורי מקשים         | רשימת בדיקה ידנית + בדיקת עשן                            |
+| M4  | תצוגה מקדימה: מרנדר 1080×1920, ניגון, גלילה, שכבת אזורים בטוחים  | שני קליפים ברצף בלי פער ובסנכרון                         |
+| M5  | טקסט, עוצמה והשתקה לכל קליפ, מוזיקה, פאנל מאפיינים               | להוסיף כיתוב ולהזיז אותו                                 |
+| M6  | ייצוא: 720p/1080p, סרגל התקדמות, ביטול                           | ייצוא של 30 שניות ופתיחה בנגן                            |
+| M7  | ניתוח: שקט, עוצמה, ביטים, תנועה, מוצג על ציר הזמן                | בדיקות על אותות סינתטיים + בדיקה על צילום אמיתי          |
+| M8  | מנוע v1: segment, pace, reframe, zoom + כפתור "Make it viral"    | בדיקות לכל שלב; צילום אמיתי נותן חיתוך הדוק וניתן לעריכה |
+| M9  | מנוע v2: hook, ביטים, מעברים, אפקטים קוליים, לולאה, הנמכת מוזיקה | בדיקות + בדיקה ידנית לכל preset                          |
+| M10 | ארבעה presets מלוטשים, צבע, תיעוד                                | אותו צילום דרך כל preset נראה שונה                       |
 
-| #   | Milestone                                                                                                                                                         | How to verify                                                                                      |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| M0  | Scaffold: Vite/React/TS/Tailwind/Zustand, ESLint+Prettier, Vitest, folder skeleton, README stub                                                                   | `npm run dev` shows the empty 3-pane layout; `npm test` and `npm run lint` pass                    |
-| M1  | Model + zod schema + pure ops (add, move, trim, split, delete, snap helpers) + undo/redo store                                                                    | `npm test`: op unit tests and undo/redo round-trips. No UI yet.                                    |
-| M2  | Import: drag & drop, probe, media library with thumbnails, ffmpeg.wasm fallback stub                                                                              | Drop an MP4, MOV, MP3 and PNG: the cards show duration and dimensions                              |
-| M3  | Timeline UI: tracks, drag, trim, split, delete, snapping, playhead, zoom, shortcuts (Space/S/Del/Ctrl+Z/Ctrl+Shift+Z)                                             | Manual checklist in the README; Playwright smoke test for split and undo                           |
-| M4  | Preview: WebGL2 compositor at 1080×1920, scaled to fit; playback clock; audio engine; scrubbing; safe-zone overlay (TikTok/Reels/Shorts toggle)                   | Play two clips back to back: no gap and A/V in sync. The safe-zone toggle works.                   |
-| M5  | Text overlays (Heebo, stroke/shadow), per-clip volume and mute, music track, Inspector panel                                                                      | Add a caption, move and scale it, check that muted clips are silent                                |
-| M6  | Export: worker with OffscreenCanvas compositor, VideoEncoder H.264, OfflineAudioContext mix → AAC, Mediabunny MP4. Resolution 720p or 1080p, progress bar, cancel | Export a 30 s project and open it in VLC/QuickTime: correct length, A/V sync, matches the preview  |
-| M7  | Analysis worker: silence, loudness, beats, motion, drawn as timeline overlays                                                                                     | Unit tests on synthetic signals (tone+silence, 120 BPM click track). Visual check on real footage. |
-| M8  | Engine v1: segment, pace, reframe and zoom stages; "Make it viral" dialog with preset picker                                                                      | Unit tests per stage plus golden-file tests; a real clip gives an editable, tight cut              |
-| M9  | Engine v2: hook, beat snap, transitions (shaders), SFX pack, loop ending, music ducking                                                                           | Golden tests; manual review against each preset                                                    |
-| M10 | Four polished presets, color grade shader, README data-model and preset docs                                                                                      | Run each preset on the same footage; the results differ visibly                                    |
+## סיכוני ביצועים
 
-## Performance risks (flagged early)
+- **זיכרון:** חובה לשחרר כל פריים (`close()`) מיד. אודיו מפוענח תופס בערך 23MB לדקה.
+- **מהירות ייצוא:** צפוי 2–5 פעמים מהירות אמת ב־1080p30. טקסט יורנדר לטקסטורה פעם אחת.
+- **HEVC/HDR מאייפון:** עלול לא להיפתח בחלק מהגרסאות. נזהה עם `VideoDecoder.isConfigSupported` ונעבור ל־ffmpeg.wasm האיטי (מוגבל לכ־2GB).
+- **Safari באייפון:** WebCodecs, WebGL ב־worker וקידוד אודיו פחות בשלים. נבדוק בכל אבן דרך על מכשיר אמיתי.
+- **סנכרון תצוגה מקדימה:** אם `<video>` מרובים מגמגמים, נעבור למפענח המדויק גם בתצוגה.
+- **ציר זמן צפוף:** מעל כ־200 קליפים במסלול נצייר על canvas.
 
-- **Memory:** we never hold full-resolution decoded frames. VideoFrames must be `close()`d immediately (the most common WebCodecs leak), and analysis works on downmixed, downscaled data only. Preview audio buffers take about 23 MB per minute of source.
-- **Export speed:** encoding is expected to run at 2–5× realtime for 1080p30. Rendering text as textures once, instead of every frame, matters here.
-- **HEVC/iPhone HDR footage** may fail to decode, or show washed-out colors, on some Chromium builds. We detect this with `VideoDecoder.isConfigSupported` and fall back to an ffmpeg.wasm transcode. That fallback is slow (about 0.3–1× realtime) and capped at about 2 GB of wasm memory, so the UI warns first.
-- **Sync of multiple video elements** during preview can jitter on cheap laptops. If it does, the preview switches to the WebCodecs source as well.
-- **Main thread:** the timeline renders in the DOM. Clips and waveform peaks are drawn to a canvas once a track has more than about 200 clips (the auto-edit output can be dense).
-- **Cross-origin isolation** (COOP/COEP) is not needed with the single-thread ffmpeg core. If we add it later, it can break cross-origin assets.
+## אחר כך (המודל כבר לא חוסם)
 
-## Later (the model already supports these)
+keyframes, פילטרים ו־LUT, כתוביות בעברית, שמירה וטעינה של פרויקט (IndexedDB/OPFS), ממשק RTL מלא, מעקב אחרי נושא, זיהוי רגעים בולטים ב־AI.
 
-- Keyframes use `Animatable`.
-- Effects allow a `lut` type.
-- Subtitles fit as text clips generated from a transcript.
-- Project save/load: the project is plain JSON, and asset files move to OPFS.
-- RTL: the font is already in place, and the UI can use logical CSS properties from the start.
-- Subject tracking fits the `reframe` interface.
-- AI highlights would add a new `score` input.
+## שיטת עבודה
 
-## Workflow
-
-After each milestone: run `npm test && npm run lint && npm run build`, do the manual check from the table, commit with a clear message, then push to `claude/shortform-video-editor-plan-x8i2i0`.
+אחרי כל אבן דרך: `npm test && npm run lint && npm run build`, בדיקה ידנית (כולל באייפון), commit ו־push.
